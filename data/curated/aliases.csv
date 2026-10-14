@@ -41,3 +41,5 @@ PC60BM,organic:PCBM,
 PC71BM,organic:PC71BM,
 C60,organic:C60,fullerene (not carbon)
 BCP,organic:BCP,bathocuproine
+LBSO,BaSnO3,"La-doped BaSnO3 (lanthanum barium tin oxide); the dopant is ignored"
+MAPbI3-xClx,CH3NH3PbI3,"mixed-halide methylammonium lead iodide; films keep little Cl (x ≈ 0), so read as MAPbI3"

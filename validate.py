@@ -11,12 +11,13 @@ offsets, add rows to data/curated/validation_band_offsets.csv. Compare two versi
   A2.               the same errors split by label source, chemistry and gap size; the label-noise floor.
   B.  Band edges    every measured VBM vs what the tool predicts when the measurement is hidden.
   C1. Offsets       measured valence-band offsets (validation_band_offsets.csv), with and without measured edges.
-  C2. Devices       the published device stacks in data/multilayer_gold_standard.csv (SCAPS band edges).
+  C2. Junctions     the reference junctions in data/gold_junctions.csv: measured interfaces and junctions of
+                    published device stacks (one row each, built by rule; see the file's source column).
   D.  Calibration   are the σ values in predict.py right, and does "85 %" mean right 85 % of the time?
   E.  Coverage      how much data stands behind the numbers above.
 
 Every mean-type metric has a 95 % bootstrap interval (ci_low, ci_high), resampling element systems, materials,
-interfaces or device stacks. Rows marked primary are the ones to decide changes on; the rest are diagnostics.
+interfaces or, for C2/D, source papers (junctions from one paper move together). Rows marked primary are the ones to decide changes on; the rest are diagnostics.
 
 Writes results/metrics.csv (readable table), results/metrics.json (for the web UI), and two detail tables:
 results/gap_cv_predictions.csv and results/junction_details.csv.
@@ -36,7 +37,7 @@ from scipy.stats import spearmanr
 
 from materialstack import model
 from materialstack.chem import elements
-from materialstack.config import (BAND_EDGES, BAND_GAPS, GOLD_STACKS, MEASURED_OFFSETS, RESULTS,
+from materialstack.config import (BAND_EDGES, BAND_GAPS, GOLD_JUNCTIONS, MEASURED_OFFSETS, RESULTS,
                                   VALIDATION_OFFSETS)
 from materialstack.predict import CONFIDENT, SIGMA_GAP, SIGMA_VBM, predict_stack, resolve_layer
 
@@ -205,45 +206,25 @@ def validate_measured_offsets() -> pd.DataFrame:
 
 
 def parse_gold() -> pd.DataFrame:
-    """One row per junction of the gold stacks: names, gold type, gold offsets (next − previous layer)."""
-    g = pd.read_csv(GOLD_STACKS)
-    g = g[g["list of devices"].notna() & g["s.no"].notna()]
-    rows, skipped = [], []
-    for r in g.itertuples(index=False):
-        names = [x.strip() for x in str(r[2]).split("|")]
-        try:
-            cbm, vbm = ([float(x) for x in str(c).split("|")] for c in (r[4], r[5]))
-        except ValueError:
-            skipped.append(f"{r[0]:g} (band edges are not numbers)")
-            continue
-        if not len(names) == len(cbm) == len(vbm):
-            skipped.append(f"{r[0]:g} ({len(names)} layers, {len(cbm)} CBMs, {len(vbm)} VBMs)")
-            continue
-        types = {k.strip(): t for k, t in re.findall(r"([^;:]+):\s*Type\s+(I{1,3})", str(r[6]))}
-        borderline = {k.strip() for k in re.findall(r"([^;:]+):\s*Type\s+I{1,3}\s*\(borderline", str(r[6]))}
-        for i in range(len(names) - 1):
-            key = f"{names[i]}/{names[i + 1]}"
-            rows.append({"stack": int(r[0]), "top": names[i], "bottom": names[i + 1],
-                         "gold_type": types.get(key), "borderline": key in borderline,
-                         "gold_dEc": cbm[i + 1] - cbm[i], "gold_dEv": vbm[i + 1] - vbm[i]})
-    if skipped:
-        print(f"   gold file: skipped {len(skipped)} stack(s): " + "; ".join(skipped))
-    return pd.DataFrame(rows)
+    """One row per reference junction: names, gold type, gold offsets (bottom − top), source paper."""
+    g = pd.read_csv(GOLD_JUNCTIONS)
+    return pd.DataFrame({"source": g.source, "kind": g.kind, "top": g.top, "bottom": g.bottom, "gold_type": g.type,
+                         "gold_dEc": g.dEc_ev, "gold_dEv": g.dEv_ev})
 
 
 def validate_gold_stacks() -> tuple[pd.DataFrame, pd.DataFrame]:
-    J = parse_gold()                                   # rows are in stack order, top to bottom
+    J = parse_gold()
     layers = []
     for scope, use in SCOPES.items():
         tag = "tool" if use else "nomeas"
         res = []
-        for stack, g in J.groupby("stack", sort=False):
-            out = predict_stack([g.top.iloc[0]] + g.bottom.tolist(), use)
+        for r in J.itertuples():
+            out = predict_stack([r.top, r.bottom], use)
             res += out["junctions"]
             if use:
-                layers += [{"stack": stack, "gap_kind": L["gap_kind"], "edge_kind": L["edge_kind"]} for L in out["layers"]]
+                layers += [{"source": r.source, "gap_kind": L["gap_kind"], "edge_kind": L["edge_kind"]} for L in out["layers"]]
         J[f"{tag}_type"] = [p["type"] for p in res]
-        J[f"{tag}_dEc"] = [p.get("cbo_ev") for p in res]               # CBM(next) − CBM(previous)
+        J[f"{tag}_dEc"] = [p.get("cbo_ev") for p in res]               # CBM(bottom) − CBM(top)
         J[f"{tag}_dEv"] = [-p["vbo_ev"] if p.get("vbo_ev") is not None else None for p in res]
         J[f"{tag}_confidence"] = [p.get("confidence") for p in res]
         for t in ("I", "II", "III"):
@@ -251,7 +232,7 @@ def validate_gold_stacks() -> tuple[pd.DataFrame, pd.DataFrame]:
         J[f"{tag}_offset_source"] = [p.get("offset_source") for p in res]
     J.round(3).to_csv(RESULTS / "junction_details.csv", index=False)
 
-    s = "C2. Gold-standard device stacks"
+    s = "C2. Gold-standard junctions"
     scored = J[J.gold_type.notna()]
     majority = scored.gold_type.mode().iloc[0]
     clear = (scored.gold_dEc.abs() >= CLEAR_MIN) & (scored.gold_dEv.abs() >= CLEAR_MIN)
@@ -259,24 +240,24 @@ def validate_gold_stacks() -> tuple[pd.DataFrame, pd.DataFrame]:
         tag = "tool" if use else "nomeas"
         p = scored[scored[f"{tag}_type"].notna()]
         ok = p[f"{tag}_type"] == p.gold_type
-        add_mean(s, f"Coverage, {scope}", scored[f"{tag}_type"].notna(), scored["stack"], "%", 100,
+        add_mean(s, f"Coverage, {scope}", scored[f"{tag}_type"].notna(), scored["source"], "%", 100,
                  note="junctions with a prediction")
-        add_mean(s, f"Type accuracy, {scope}", ok, p["stack"], "%", 100,
+        add_mean(s, f"Type accuracy, {scope}", ok, p["source"], "%", 100,
                  baseline=(p.gold_type == majority).mean() * 100, baseline_rule=f"always predict Type {majority}")
         c = clear.reindex(p.index)
-        add_mean(s, f"Type accuracy on clear junctions (both offsets ≥ {CLEAR_MIN:g} eV), {scope}", ok[c], p["stack"][c],
+        add_mean(s, f"Type accuracy on clear junctions (both offsets ≥ {CLEAR_MIN:g} eV), {scope}", ok[c], p["source"][c],
                  "%", 100, baseline=(p.gold_type[c] == majority).mean() * 100,
                  baseline_rule=f"always predict Type {majority}",
                  note="near-zero offsets make the type hinge on a few tenths of an eV")
         conf = p[f"{tag}_confidence"] >= CONFIDENT
         add_mean(s, f"Type accuracy when confident (≥ {CONFIDENT:.0%}), {scope}".replace("%)", " %)"), ok[conf],
-                 p["stack"][conf], "%", 100, note="junctions not flagged 'check with DFT'", primary=use)
+                 p["source"][conf], "%", 100, note="junctions not flagged 'check with DFT'", primary=use)
         for q, label in (("dEc", "ΔEc"), ("dEv", "ΔEv")):
-            add_mean(s, f"{label} MAE, {scope}", (p[f"{tag}_{q}"] - p[f"gold_{q}"]).abs(), p["stack"],
+            add_mean(s, f"{label} MAE, {scope}", (p[f"{tag}_{q}"] - p[f"gold_{q}"]).abs(), p["source"],
                      baseline=p[f"gold_{q}"].abs().mean(), baseline_rule=f"predict {label} = 0", primary=use)
             big = p[p[f"gold_{q}"].abs() >= SIGN_MIN]
             add_mean(s, f"{label} sign agreement (|gold| ≥ {SIGN_MIN:g} eV), {scope}",
-                     np.sign(big[f"{tag}_{q}"].astype(float)) == np.sign(big[f"gold_{q}"]), big["stack"], "%", 100,
+                     np.sign(big[f"{tag}_{q}"].astype(float)) == np.sign(big[f"gold_{q}"]), big["source"], "%", 100,
                      note="spike vs cliff: decides whether carriers are extracted or blocked", primary=use)
     print("C2. gold stacks done")
     return J, pd.DataFrame(layers)
@@ -305,7 +286,7 @@ def validate_calibration(gaps: pd.DataFrame, edges: pd.DataFrame, offsets: pd.Da
     truth = np.stack([(p.gold_type == t).to_numpy() for t in ("I", "II", "III")], axis=1).astype(float)
     majority = (np.array(["I", "II", "III"]) == p.gold_type.mode().iloc[0]).astype(float)
     add_mean(s, "Brier score of the junction-type probabilities (gold stacks)", ((probs - truth) ** 2).sum(axis=1),
-             p["stack"], "", baseline=((majority - truth) ** 2).sum(axis=1).mean(),
+             p["source"], "", baseline=((majority - truth) ** 2).sum(axis=1).mean(),
              baseline_rule="always Type II with certainty", note="0 = perfect, lower is better", primary=True)
     conf, ok = p.tool_confidence.to_numpy(float), (p.tool_type == p.gold_type).to_numpy()
     bins = np.digitize(conf, CONF_BINS) - 1
@@ -316,11 +297,11 @@ def validate_calibration(gaps: pd.DataFrame, edges: pd.DataFrame, offsets: pd.Da
     for b in range(len(CONF_BINS) - 1):
         m = bins == b
         lo, hi = CONF_BINS[b], min(CONF_BINS[b + 1], 1.0)
-        add_mean(s, f"Reliability: accuracy at confidence {lo:.0%}–{hi:.0%}", ok[m], p["stack"][m], "%", 100,
+        add_mean(s, f"Reliability: accuracy at confidence {lo:.0%}–{hi:.0%}", ok[m], p["source"][m], "%", 100,
                  baseline=conf[m].mean() * 100 if m.any() else None,
                  baseline_rule="mean confidence in the bin (equal when calibrated)")
     add_mean(s, f"Share of junctions called with ≥ {CONFIDENT:.0%} confidence".replace("%", " %"), conf >= CONFIDENT,
-             p["stack"], "%", 100, note="how often the tool commits; read with the accuracy when confident",
+             p["source"], "%", 100, note="how often the tool commits; read with the accuracy when confident",
              primary=True)
     print("D. calibration done")
 
@@ -337,8 +318,8 @@ def data_coverage(gaps: pd.DataFrame, layers: pd.DataFrame) -> None:
     add(s, "Oxides with hybrid-DFT surface edges", (edges.basis == "hybrid-DFT surfaces").sum(), "")
     add(s, "Measured interface offsets (used by the tool)", len(pd.read_csv(MEASURED_OFFSETS)), "")
     add(s, "Reference offsets for C1", len(pd.read_csv(VALIDATION_OFFSETS)), "")
-    add_mean(s, "Device-stack layers with a measured gap", layers.gap_kind == "measured", layers["stack"], "%", 100)
-    add_mean(s, "Device-stack layers with measured band edges", layers.edge_kind == "measured", layers["stack"], "%", 100)
+    add_mean(s, "Reference-junction layers with a measured gap", layers.gap_kind == "measured", layers["source"], "%", 100)
+    add_mean(s, "Reference-junction layers with measured band edges", layers.edge_kind == "measured", layers["source"], "%", 100)
 
 
 if __name__ == "__main__":
