@@ -63,5 +63,6 @@ if FRONTEND_DIST.is_dir():
 
     @app.get("/{full_path:path}")
     def spa(full_path: str = ""):
-        candidate = FRONTEND_DIST / full_path
-        return FileResponse(candidate if full_path and candidate.is_file() else FRONTEND_DIST / "index.html")
+        candidate = (FRONTEND_DIST / full_path).resolve()
+        inside = candidate.is_relative_to(FRONTEND_DIST.resolve())     # "/..%2f..%2fetc/passwd" must not leave dist/
+        return FileResponse(candidate if full_path and inside and candidate.is_file() else FRONTEND_DIST / "index.html")
