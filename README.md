@@ -18,7 +18,7 @@ Everything the tool needs is in the repository: the source data (`data/raw/`), t
 model and the built web UI. Only Python packages are installed.
 
 1. Install **Python 3.12 or newer** (python.org; on Windows tick "Add python.exe to PATH") and Git.
-2. `git clone https://github.com/advaymakhija/MaterialStack.git` (or GitHub → Code → Download ZIP).
+2. `git clone https://github.com/ViditGupta0603/MaterialStack.git` (or GitHub → Code → Download ZIP).
 3. In the `MaterialStack` folder run **`setup.bat`** (Windows, double-click works) or **`bash setup.sh`**
    (macOS / Linux). It creates `.venv`, installs the packages (needs internet, a few minutes) and runs one
    test prediction.
