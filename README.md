@@ -56,7 +56,7 @@ python -m materialstack serve                              # web UI + API on htt
 | `data/dft_gaps.csv` | One GGA and one hybrid DFT gap per formula (stable polymorphs): the model's hint | `build_data.py` |
 | `data/band_edges.csv` | VBM (and CBM) per material: measured and/or hybrid-DFT surfaces | `build_data.py` |
 | `data/features.csv` | The exact table the model trained on (formula, gap, 157 features); for inspection only | `train.py` |
-| `data/multilayer_gold_standard.csv` | 50 published device stacks with band edges, the validation reference | given |
+| `data/gold_junctions.csv` | Validation reference (v5): 57 junctions, one row each (34 measured interfaces, 23 from journal device-simulation papers), with source; built by rule with `MaterialStack_extras/literature_advay/scripts/build_gold_v5.py` | given |
 | `data/raw/` | Source files as downloaded, never edited (committed, so setup needs no downloads) | `build_data.py` |
 
 Sources: measured gaps from Zhuo et al. 2018 (JPCL) and Borlido et al. 2019 (JCTC); DFT gaps from
