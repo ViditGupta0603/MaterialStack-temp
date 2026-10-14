@@ -8,8 +8,7 @@ __pycache__/
 # web UI dependencies (frontend/dist, the built UI, is committed so no Node.js is needed)
 frontend/node_modules/
 
-# local tool settings, editor lock files, OS files
-.claude/settings.local.json
+# editor lock files, OS files
 .~lock.*
 .DS_Store
 Thumbs.db

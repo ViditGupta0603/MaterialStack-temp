@@ -143,3 +143,9 @@ def test_cv_fold_is_fixed_by_element_system_alone():
     assert fold_of(element_group("CsPbI3")) == fold_of(element_group("Cs4PbI6"))   # same elements, same fold
     assert fold_of("As-Ga") == fold_of("As-Ga")                                    # no randomness, no other data
     assert {fold_of(f"X{i}") for i in range(200)} == {0, 1, 2, 3, 4}
+
+
+def test_web_ui_route_never_serves_files_outside_dist():
+    from materialstack.api import FRONTEND_DIST, spa
+    assert spa("../../README.md").path == FRONTEND_DIST / "index.html"
+    assert spa("index.html").path == (FRONTEND_DIST / "index.html").resolve()
